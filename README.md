@@ -10,3 +10,4 @@ In an already set up Hammer repo, run the following:
   cd hammer-energy-char
   <hammer flow>
 ```
+Jupyter notebooks are found in `experiments/`, but run all hammer commands in the root of this directory.
