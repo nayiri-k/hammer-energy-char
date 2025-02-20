@@ -7,42 +7,43 @@ Set these defines in Hammer
 yaml or uncomment below
 ****************************/
 
-// FPU8 >>
+// FP8 >>
 // `define WIDTH 8
 // `define EXPONENT 4
 // `define MANTISSA 3
-// `define EXP_MIN -6
-// `define EXP_MAX  7
-// << FPU8
+// << FP8
 
-// FPU16 >>
+// FP16 >>
 // `define WIDTH 16
 // `define EXPONENT 5
 // `define MANTISSA 11
-// `define EXP_MIN -14
-// `define EXP_MAX  15
-// << FPU16
+// << FP16
 
-// FPU32 >>
+// BF16 >>
+// `define WIDTH 16
+// `define EXPONENT 8
+// `define MANTISSA 7
+// << BF16
+
+// FP32 >>
 // `define WIDTH 32
 // `define EXPONENT 8
 // `define MANTISSA 23
-// `define EXP_MIN -126
-// `define EXP_MAX  127
-// << FPU32
+// << FP32
 
-// FPU64 >>
+// FP64 >>
 // `define WIDTH 64
 // `define EXPONENT 11
 // `define MANTISSA 52
-// `define EXP_MIN -1022
-// `define EXP_MAX  1023
-// << FPU64
+// << FP64
 
 // TODO: check if bfloat works
 
 
 // derived defines
+`define EXP_MIN -(1 << (`EXPONENT - 1)) + 2
+`define EXP_MAX (1 << (`EXPONENT - 1)) - 1
+`define EXP_OFFSET `EXP_MAX
 `define SB `WIDTH-1
 `define EHB `WIDTH-2
 `define ELB `MANTISSA
@@ -136,8 +137,8 @@ module fpu_adder(
       begin
         a_m <= {a[`MTSBITS], 3'd0};
         b_m <= {b[`MTSBITS], 3'd0};
-        a_e <= a[`EXPBITS] - `EXP_MAX;
-        b_e <= b[`EXPBITS] - `EXP_MAX;
+        a_e <= a[`EXPBITS] - `EXP_OFFSET;
+        b_e <= b[`EXPBITS] - `EXP_OFFSET;
         a_s <= a[`WIDTH-1];
         b_s <= b[`WIDTH-1];
         state <= special_cases;
@@ -146,19 +147,19 @@ module fpu_adder(
       special_cases:
       begin
         //if a is NaN or b is NaN return NaN 
-        if ((a_e == (`EXP_MAX+1) && a_m != 0) || (b_e == (`EXP_MAX+1) && b_m != 0)) begin
+        if ((a_e == (`EXP_OFFSET+1) && a_m != 0) || (b_e == (`EXP_OFFSET+1) && b_m != 0)) begin
           z[`WIDTH-1] <= 1;
           z[`EXPBITS] <= `EXP_MAXVAL;
           z[`MHB] <= 1;
           z[`MHB-1:0] <= 0;
           state <= put_z;
         //if a is inf return inf
-        end else if (a_e == (`EXP_MAX+1)) begin
+        end else if (a_e == (`EXP_OFFSET+1)) begin
           z[`WIDTH-1] <= a_s;
           z[`EXPBITS] <= `EXP_MAXVAL;
           z[`MTSBITS] <= 0;
           //if a is inf and signs don't match return nan
-          if ((b_e == (`EXP_MAX+1)) && (a_s != b_s)) begin
+          if ((b_e == (`EXP_OFFSET+1)) && (a_s != b_s)) begin
               z[`WIDTH-1] <= b_s;
               z[`EXPBITS] <= `EXP_MAXVAL;
               z[`MHB] <= 1;
@@ -166,38 +167,38 @@ module fpu_adder(
           end
           state <= put_z;
         //if b is inf return inf
-        end else if (b_e == (`EXP_MAX+1)) begin
+        end else if (b_e == (`EXP_OFFSET+1)) begin
           z[`WIDTH-1] <= b_s;
           z[`EXPBITS] <= `EXP_MAXVAL;
           z[`MTSBITS] <= 0;
           state <= put_z;
         //if a is zero return b
-        end else if ((($signed(a_e) == -`EXP_MAX) && (a_m == 0)) && (($signed(b_e) == -`EXP_MAX) && (b_m == 0))) begin
+        end else if ((($signed(a_e) == -`EXP_OFFSET) && (a_m == 0)) && (($signed(b_e) == -`EXP_OFFSET) && (b_m == 0))) begin
           z[`WIDTH-1] <= a_s & b_s;
-          z[`EXPBITS] <= b_e[`EXPONENT-1:0] + `EXP_MAX;
+          z[`EXPBITS] <= b_e[`EXPONENT-1:0] + `EXP_OFFSET;
           z[`MTSBITS] <= b_m[`MANTISSA+3:3];
           state <= put_z;
         //if a is zero return b
-        end else if (($signed(a_e) == -`EXP_MAX) && (a_m == 0)) begin
+        end else if (($signed(a_e) == -`EXP_OFFSET) && (a_m == 0)) begin
           z[`WIDTH-1] <= b_s;
-          z[`EXPBITS] <= b_e[`EXPONENT-1:0] + `EXP_MAX;
+          z[`EXPBITS] <= b_e[`EXPONENT-1:0] + `EXP_OFFSET;
           z[`MTSBITS] <= b_m[`MANTISSA+3:3];
           state <= put_z;
         //if b is zero return a
-        end else if (($signed(b_e) == -`EXP_MAX) && (b_m == 0)) begin
+        end else if (($signed(b_e) == -`EXP_OFFSET) && (b_m == 0)) begin
           z[`WIDTH-1] <= a_s;
-          z[`EXPBITS] <= a_e[`EXPONENT-1:0] + `EXP_MAX;
+          z[`EXPBITS] <= a_e[`EXPONENT-1:0] + `EXP_OFFSET;
           z[`MTSBITS] <= a_m[`MANTISSA+3:3];
           state <= put_z;
         end else begin
           //Denormalised Number
-          if ($signed(a_e) == -`EXP_MAX) begin
+          if ($signed(a_e) == -`EXP_OFFSET) begin
             a_e <= `EXP_MIN;
           end else begin
             a_m[`MANTISSA+3] <= 1;
           end
           //Denormalised Number
-          if ($signed(b_e) == -`EXP_MAX) begin
+          if ($signed(b_e) == -`EXP_OFFSET) begin
             b_e <= `EXP_MIN;
           end else begin
             b_m[`MANTISSA+3] <= 1;
@@ -296,7 +297,7 @@ module fpu_adder(
       pack:
       begin
         z[`MTSBITS] <= z_m[`MTSBITS];
-        z[`EXPBITS] <= z_e[`EXPONENT-1:0] + `EXP_MAX;
+        z[`EXPBITS] <= z_e[`EXPONENT-1:0] + `EXP_OFFSET;
         z[`WIDTH-1] <= z_s;
         if ($signed(z_e) == `EXP_MIN && z_m[`ELB] == 0) begin
           z[`EXPBITS] <= 0;
@@ -305,7 +306,7 @@ module fpu_adder(
           z[`WIDTH-1] <= 1'b0; // FIX SIGN BUG: -a + a = +0.
         end
         //if overflow occurs, return inf
-        if ($signed(z_e) > `EXP_MAX) begin
+        if ($signed(z_e) > `EXP_OFFSET) begin
           z[`MTSBITS] <= 0;
           z[`EXPBITS] <= `EXP_MAXVAL;
           z[`WIDTH-1] <= z_s;
