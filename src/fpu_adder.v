@@ -19,12 +19,6 @@ yaml or uncomment below
 // `define MANTISSA 11
 // << FP16
 
-// BF16 >>
-// `define WIDTH 16
-// `define EXPONENT 8
-// `define MANTISSA 7
-// << BF16
-
 // FP32 >>
 // `define WIDTH 32
 // `define EXPONENT 8
@@ -38,6 +32,12 @@ yaml or uncomment below
 // << FP64
 
 // TODO: check if bfloat works
+
+// BF16 >>
+// `define WIDTH 16
+// `define EXPONENT 8
+// `define MANTISSA 7
+// << BF16
 
 
 // derived defines
