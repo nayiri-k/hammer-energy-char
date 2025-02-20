@@ -2,37 +2,45 @@
 //Copyright (C) Jonathan P Dawson 2013
 //2013-12-12
 
-`ifdef FPU8
-`define WIDTH 8
-`define EXPONENT 4
-`define MANTISSA 3
-`define EXP_MIN -6
-`define EXP_MAX  7
-`endif // FPU8
+/***************************
+Set these defines in Hammer 
+yaml or uncomment below
+****************************/
 
-`ifdef FPU16
-`define WIDTH 16
-`define EXPONENT 5
-`define MANTISSA 11
-`define EXP_MIN -14
-`define EXP_MAX  15
-`endif // FPU16
+// FPU8 >>
+// `define WIDTH 8
+// `define EXPONENT 4
+// `define MANTISSA 3
+// `define EXP_MIN -6
+// `define EXP_MAX  7
+// << FPU8
 
-`ifdef FPU32
-`define WIDTH 32
-`define EXPONENT 8
-`define MANTISSA 23
-`define EXP_MIN -126
-`define EXP_MAX  127
-`endif // FPU32
+// FPU16 >>
+// `define WIDTH 16
+// `define EXPONENT 5
+// `define MANTISSA 11
+// `define EXP_MIN -14
+// `define EXP_MAX  15
+// << FPU16
 
-`ifdef FPU64
-`define WIDTH 64
-`define EXPONENT 11
-`define MANTISSA 52
-`define EXP_MIN -1022
-`define EXP_MAX  1023
-`endif // FPU64
+// FPU32 >>
+// `define WIDTH 32
+// `define EXPONENT 8
+// `define MANTISSA 23
+// `define EXP_MIN -126
+// `define EXP_MAX  127
+// << FPU32
+
+// FPU64 >>
+// `define WIDTH 64
+// `define EXPONENT 11
+// `define MANTISSA 52
+// `define EXP_MIN -1022
+// `define EXP_MAX  1023
+// << FPU64
+
+// TODO: check if bfloat works
+
 
 // derived defines
 `define SB `WIDTH-1

@@ -1,15 +1,12 @@
 `timescale 1ns/10ps
 
+/***************************
+Must set WIDTH define
+****************************/
 
-`ifdef FPU16
-`define WIDTH 16
-`endif
-`ifdef FPU32
-`define WIDTH 32
-`endif
-`ifdef FPU64
-`define WIDTH 64
-`endif
+// `define WIDTH 16
+// `define WIDTH 32
+// `define WIDTH 64
 
 
 module fpu_adder_tb;
