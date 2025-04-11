@@ -1,15 +1,11 @@
-import math
-import matplotlib.pyplot as plt
-import numpy as np
-import os
-import pandas as pd
-import pathlib
-import random
-import struct
-import subprocess
-import sys
+import yaml, os, subprocess, struct, random, sys, math, re
+from pathlib import Path
 from typing import TypedDict
+import pandas as pd
+import numpy as np
+import matplotlib.pyplot as plt
 
+# --- Test Functions ---
 class SRAMConfig(TypedDict):
     SRAM: str
     DATA_WIDTH: int
@@ -17,80 +13,46 @@ class SRAMConfig(TypedDict):
     WMASK_WIDTH: int
 
 class OpCode:
-    """Operation codes for SRAM access."""
     READ = 0
     WRITE = 1
 
 class DataValue:
-    """32-bit data input values."""
     ZERO = 0
     MAX = (1 << 32) - 1
 
 class Address:
-    """6-bit address space."""
     ZERO = 0
-    ONE = 1
-    MAX = (1 << 6) - 1  # 6-bit max address
+    MAX = (1 << 6) - 1
 
 class WriteMask:
-    """4-bit write mask for 32-bit word (8-bit granularity)."""
     ZERO = 0
     MAX = (1 << 4) - 1
 
 def parse_sram_config(sram_config: str) -> SRAMConfig:
-    """
-    Parses an SRAM configuration string and extracts key parameters.
-    """
     parts = sram_config.split("_")[1]
     num_words = int(parts.split("x")[0])
     data_width = int(parts.split("x")[1].split("m")[0])
     write_size = int(parts.split("w")[1])
-
     addr_width = int(math.ceil(math.log2(num_words)))
     wmask_width = data_width // write_size
-
     return {
-        "SRAM"        : sram_config,
-        "DATA_WIDTH"  : data_width,
-        "ADDR_WIDTH"  : addr_width,
-        "WMASK_WIDTH" : wmask_width
+        "SRAM": sram_config,
+        "DATA_WIDTH": data_width,
+        "ADDR_WIDTH": addr_width,
+        "WMASK_WIDTH": wmask_width
     }
 
-def create_test_directories(tests: dict, base_dir: pathlib.Path, pdk: str) -> None:
-    """
-    Create necessary directories for the given tests and update the test configurations.
-    """
-    for test in tests:
-        # input/output files directory
-        test_dir = base_dir / test
-        test_dir.mkdir(exist_ok=True, parents=True)
-        print(f"Directory created at: {test_dir}")
-        tests[test]['defines']['TESTROOT'] = test_dir
-        tests[test]['root'] = test_dir
-
-        # hammer build directory
-        obj_dir = f"build-{pdk}-cm/{tests[test]['design']}"
-        tests[test]['obj_dir'] = obj_dir
-        tests[test]['obj_dpath'] = energy_char_dpath / obj_dir
-
-def write_input_files(tests: dict) -> None:
-    """
-    Generate input files for a set of tests.
-    """
-    for test_name in tests:
-        input_path = tests[test_name]['root'] / 'input.txt'
-        with input_path.open('w') as input_file:
-            for input_line in tests[test_name]['inputs']:
-                binary_operands = ['{0:b}'.format(operand) for operand in input_line]
-                input_file.write(" ".join(binary_operands) + '\n')
-        print(f"Inputs for '{test_name}' test written at: {input_path}")
-
-def generate_hammer_config(test: dict, clock_period: int) -> None:
-    defines_str = '\n'.join( [ f"  - {key}={val}" for key,val in test['defines'].items() ] )
-    delays = [f"""{{name: {input_port}, clock: {test['clock']}, delay: "1", direction: input}}""" for input_port in test['input_ports']]
-    delays += [f"""{{name: {output_port}, clock: {test['clock']}, delay: "1", direction: output}}""" for output_port in test['output_ports']]
+# --- YAML Writer ---
+def writeYaml(td):
+    defines_str = '\n'.join([f"  - {key}={val}" for key, val in td['defines'].items()])
+    delays = [
+        f"""{{name: {i}, clock: {td['clock']}, delay: "1", direction: input}}""" for i in td['input_ports']
+    ] + [
+        f"""{{name: {i}, clock: {td['clock']}, delay: "1", direction: output}}""" for i in td['output_ports']
+    ]
     delays = ',\n  '.join(delays)
-    config = f"""\
+    clock_period = td["clock_period"]
+    cfg = f"""\
 vlsi.core.build_system: make
 vlsi.inputs.power_spec_type: cpf
 vlsi.inputs.power_spec_mode: auto
@@ -99,148 +61,181 @@ design.defines: &DEFINES
   - CLOCK_PERIOD={clock_period}
 {defines_str}
 
-vlsi.inputs.clocks: [{{name: "clock", period: "{clock_period}ns", uncertainty: "100ps"}}]
-
+vlsi.inputs.clocks: [{{name: {td['clock']}, period: "{clock_period}ns", uncertainty: "100ps"}}]
 vlsi.inputs.delays: [
   {delays}
 ]
 
 synthesis.inputs:
-  top_module: {test['top_module']}
-  input_files: {test['vsrcs']}
+  top_module: {td['top_module']}
+  input_files: {td['vsrcs']}
   defines: *DEFINES
 
 sim.inputs:
-  top_module: {test['top_module']}
-  tb_name: {test['tb_name']}
-  tb_dut: {test['tb_dut']}
+  top_module: {td['top_module']}
+  tb_name: {td['tb_name']}
+  tb_dut: {td['tb_dut']}
   options: ["-timescale=1ns/10ps", "-sverilog"]
   options_meta: append
   defines: *DEFINES
   defines_meta: append
   level: rtl
-  input_files: {test['vsrcs'] + test['vsrcs_tb']}
+  input_files: {td['vsrcs'] + td['vsrcs_tb']}
 
 vlsi.core.power_tool: hammer.power.joules
-
 power.inputs:
   level: rtl
-  top_module: {test['top_module']}
-  tb_name: {test['tb_name']}
-  tb_dut: {test['tb_dut']}
+  top_module: {td['top_module']}
+  tb_name: {td['tb_name']}
+  tb_dut: {td['tb_dut']}
   defines: *DEFINES
-  input_files: {test['vsrcs']}
+  input_files: {td['vsrcs']}
   report_configs:
-    - waveform_path: {test['root']}/output.fsdb
-      report_stem: {test['root']}/power
-      toggle_signal: {test['clock']}
+    - waveform_path: {td['root']}/output.fsdb
+      report_stem: {td['root']}/power
+      toggle_signal: {td['clock']}
       num_toggles: 1
-      levels: all
-      output_formats:
-      - report
-      - plot_profile
-      - ppa
+      levels: 2
+      output_formats: [report, plot_profile, ppa]
 
 vlsi.inputs.placement_constraints:
-  - path: {test['top_module']}
+  - path: {td['top_module']}
     type: toplevel
     x: 0
     y: 0
     width: 100
     height: 100
-    margins:
-      left: 0
-      right: 0
-      top: 0
-      bottom: 0
+    margins: {{left: 0, right: 0, top: 0, bottom: 0}}
 
 vlsi.inputs.sram_parameters: "../../../../../hammer/technology/sky130/sram-cache.json"
 vlsi.inputs.sram_parameters_meta: ["prependlocal", "transclude", "json2list"]
 """
-    config_path = test['root'] / 'config.yml'
-    with config_path.open('w') as f:
-        f.write(config)
+    with open(td['root']/'config.yml', 'w') as f:
+        f.write(cfg)
 
-def generate_all_hammer_configs(tests: dict, clock_period: int) -> None:
-    for test in tests:
-        generate_hammer_config(test=tests[test], clock_period=clock_period)
-        print(f"Generated Hammer config for '{test}' test.")
+# --- Test Generator ---
+def createTest(test_name: str, test: dict, clock_period: int):
+    design = test_name.split('-')[0]
+    full_test_name = f"{test_name}-{clock_period}ns"
+    test.update({
+        'design': design,
+        'inst': '/sram_sim/mem0',
+        'clock': 'clock',
+        'vsrcs': ['src/sram_sim.v'],
+        'vsrcs_tb': ['src/sram_sim_tb.sv'],
+        'top_module': 'sram_sim',
+        'tb_name': 'sram_sim_tb',
+        'tb_dut': 'sram_sim_dut',
+        'input_ports': ['we', 'wmask', 'addr', 'din'],
+        'output_ports': ['dout'],
+        'clock_period': clock_period
+    })
+    root = tests_dpath / full_test_name
+    root.mkdir(exist_ok=True, parents=True)
+    test['defines']['TESTROOT'] = root
+    test['root'] = root
+    test['obj_dir'] = f"build-{PDK}-cm/{design}"
+    test['obj_dpath'] = energy_char_dpath / test['obj_dir']
+    cfg = root / 'config.yml'
+    test['make'] = f"design={design} OBJ_DIR={test['obj_dir']} extra={cfg}"
+    return full_test_name, test
 
+# --- Build/Run Helpers ---
+def runMakeCmd(make_target, td, fp, overwrite=False, verbose=False):
+    if overwrite or not fp.exists():
+        cmd = f"make {make_target} {td['make']}"
+        print(f"Running: {cmd}")
+        try:
+            subprocess.run(cmd, cwd=energy_char_dpath, shell=True, check=True,
+                           capture_output=(not verbose), text=True)
+        except subprocess.CalledProcessError as e:
+            print(f"\nMake command failed with return code {e.returncode}")
+            if not verbose:
+                print("STDOUT:\n", e.stdout)
+                print("STDERR:\n", e.stderr)
+            raise
 
-def run_experiments(tests: dict) -> None:
-    # generate custom make str for each test
-    for test in tests:
-        cfg = str(tests[test]['root']/'config.yml')
-        tests[test]['make'] = f"design={tests[test]['design']} OBJ_DIR={tests[test]['obj_dir']} extra={cfg}"
+def runBuild(td, overwrite=False, verbose=False): runMakeCmd("build -B", td, td['obj_dpath'], overwrite, verbose)
+def runSim(td, overwrite=False, verbose=False): runMakeCmd("redo-sim-rtl", td, td['root']/'output.fsdb', overwrite, verbose)
+def runPowerSyn(td, overwrite=False, verbose=False): runMakeCmd("power-rtl", td, td['obj_dpath']/'power-rtl-rundir/pre_report_power', overwrite, verbose)
+def runPowerReport(td, overwrite=False, verbose=False): runMakeCmd("redo-power-rtl args='--only_step report_power'", td, td['root']/'power.power.rpt', overwrite, verbose)
 
-    # build
-    build_dirs = {tests[test]['obj_dir']: test for test in tests} # run build once per build dir (not once per test)
-    for bd, test in build_dirs.items():
-        command = f"make build -B {tests[test]['make']} -B"
-        print(f"Running: {command}")
-        fpath = tests[test]['root']/'power.hier.power.rpt'
-        if not fpath.exists():
-            subprocess.run(command, shell=True, cwd=energy_char_dpath, check=True)
-    print()
+# --- Power Report Parsers ---
+def parse_hier_power_rpt(td) -> list:
+    fpath = td['root']/'power.hier.power.rpt'
+    with fpath.open('r') as f:
+        for l in f:
+            words = l.split()
+            if td['inst'] == words[-1]:
+                return [float(p) for p in words[2:6]]
+    return []
 
-    # sim-rtl
-    for test in tests:
-        command = f"make redo-sim-rtl -B {tests[test]['make']}"
-        print(f"Running: {command}")
-        fpath = tests[test]['root']/'power.hier.power.rpt'
-        if not fpath.exists():
-            subprocess.run(command, shell=True, cwd=energy_char_dpath, check=True)
-    print()
+def parse_power_profile(td) -> float:
+    fpath = td['root']/'power.profile.png.data'
+    with fpath.open('r') as f:
+        lines = f.readlines()
+    header = lines[0]
+    match = re.search(r'simulation time \((\w+)\)', header)
+    unit = match.group(1) if match else None
+    scaling = {'ns': 1, 'ps': 1e-3, 'fs': 1e-6}[unit]
+    time_power = [l.split() for l in lines[1:] if len(l.split()) == 2]
+    times = [float(t)*scaling for t,p in time_power]
+    powers = [float(p) for t,p in time_power][1:-1]
+    avgpow = sum(powers)/len(powers)
+    return times[-1] - times[0], avgpow
 
-    # # power-rtl
-    # for test in tests:
-    #     # re-use pre_report_power database if it's already generated (i.e. skip synthesis)
-    #     make_target = "redo-power-rtl args='--only_step report_power'" \
-    #             if (tests[test]['obj_dpath']/'power-rtl-rundir/pre_report_power').exists() else 'power-rtl'
-    #     command = f"make {make_target} -B {tests[test]['make']}"
-    #     print(f"Running: {command}")
-    #     fpath = tests[test]['root']/'power.hier.power.rpt'
-    #     if not fpath.exists():
-    #         subprocess.run(command, shell=True, cwd=energy_char_dpath, check=True)
-    # print()
-    
 if __name__ == "__main__":
-    # Global Parameters
-    PDK = "sky130"
-    CLOCK_PERIOD = 10 # ns
+    # --- Setup ---
+    PDK = 'sky130'
+    CLOCK_PERIOD = 10
 
-    # Paths
-    e2e_dpath = pathlib.Path(os.getcwd()).parent
-    energy_char_dpath = pathlib.Path(os.getcwd())
-    tests_dpath = energy_char_dpath / "experiments" / f"tests-{PDK}"
-    print(e2e_dpath)
+    energy_char_dpath = Path(os.getcwd())
+    tests_dpath = energy_char_dpath / f'experiments/tests-{PDK}'
+    tests_dpath.mkdir(parents=True, exist_ok=True)
+    PDKs = ["sky130"]
+    test_paths = {pdk: energy_char_dpath/f'experiments/tests-{pdk}' for pdk in PDKs}
+    num_inputs = 50
+    clock_periods = [CLOCK_PERIOD]
 
-    # Configure Tests
-    INPUT_ITERS = 50
-
-    tests = {
+    # --- Generate Tests ---
+    tests_dict = {
         'sram64x32-zero': {
-            'inputs': [(OpCode.READ, DataValue.ZERO, Address.ZERO, WriteMask.ZERO) for _ in range(INPUT_ITERS)],
+            'inputs': [(OpCode.READ, DataValue.ZERO, Address.ZERO, WriteMask.ZERO) for _ in range(num_inputs)],
             'defines': parse_sram_config("sram22_64x32m4w8"),
         }
     }
+    for clock in clock_periods:
+        for test_name, test_info in list(tests_dict.items()):
+            new_name, new_info = createTest(test_name, test_info, clock)
+            writeYaml(new_info)
+            tests_dict[new_name] = new_info
 
-    for test in tests:
-        tests[test]['design'] = test.split('-')[0]
-        tests[test]['inst'] = '/sram_sim/mem0'
-        tests[test]['clock'] = 'clock'
-        tests[test]['top_module'] = 'sram_sim'
-        tests[test]['tb_name'] = 'sram_sim_tb'
-        tests[test]['tb_dut'] = 'sram_sim_dut'
-        tests[test]['vsrcs'] = ['src/sram_sim.v']
-        tests[test]['vsrcs_tb'] = ['src/sram_sim_tb.sv']
-        tests[test]['input_ports'] = ['we', 'wmask', 'addr', 'din']
-        tests[test]['output_ports'] = ['dout']
+    python_exec_fpath = Path(sys.executable)
+    env_dpath = str(python_exec_fpath.parent)
+    if not os.environ['PATH'].startswith(env_dpath):
+        os.environ['PATH'] = env_dpath + ':' + os.environ['PATH']
 
-    # Generate Files
-    create_test_directories(tests=tests, base_dir=tests_dpath, pdk=PDK)
-    write_input_files(tests=tests)
-    generate_all_hammer_configs(tests=tests, clock_period=CLOCK_PERIOD)
+    # --- Build & Simulate ---
+    overwrite = True
+    build_dpaths = {td['obj_dpath']: t for t, td in tests_dict.items()}
+    for bd, t in build_dpaths.items(): runBuild(tests_dict[t], overwrite)
+    for bd, t in build_dpaths.items():
+        runSim(tests_dict[t], overwrite)
+        runPowerSyn(tests_dict[t], overwrite)
+        runPowerReport(tests_dict[t], overwrite)
 
-    # Run Experiments
-    run_experiments(tests=tests)
+    # --- Generate Database ---
+    # power = [parse_hier_power_rpt(td) for td in tests_dict.values()]
+    # power = pd.DataFrame(power, columns=['Leakage','Internal','Switching','Total'], index=tests_dict.keys())
+    # database = pd.DataFrame(index=tests_dict.keys())
+    # database['design'] = [t.split('-')[0] for t in tests_dict]
+    # database['clock']  = [t.split('-')[1] for t in tests_dict]
+    # database['output_af']  = [0.5 for _ in tests_dict]  # Placeholder for AF
+
+    # time_ns = [parse_power_profile(td)[0] for td in tests_dict.values()]
+    # energy = power.mul(time_ns, axis=0) / num_inputs
+    # energy.columns = [c + ' Energy (pJ)' for c in energy.columns]
+    # database['time_ns'] = time_ns
+    # database = pd.concat([database, energy, power], axis=1)
+    # database.to_hdf(PDK + '.h5', key='df', mode='w')
+    # print(database)
