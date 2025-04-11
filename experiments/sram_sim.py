@@ -3,7 +3,15 @@ from pathlib import Path
 from typing import TypedDict
 import pandas as pd
 import numpy as np
+import logging
 import matplotlib.pyplot as plt
+
+# --- Configurations ---
+logging.basicConfig(
+    level=logging.INFO,
+    format='[%(asctime)s] %(levelname)s: %(message)s',
+    datefmt='%H:%M:%S'
+)
 
 # --- Test Functions ---
 class SRAMConfig(TypedDict):
@@ -144,15 +152,15 @@ def createTest(test_name: str, test: dict, clock_period: int):
 def runMakeCmd(make_target, td, fp, overwrite=False, verbose=False):
     if overwrite or not fp.exists():
         cmd = f"make {make_target} {td['make']}"
-        print(f"Running: {cmd}")
+        logging.info(f"Running: {cmd}")
         try:
             subprocess.run(cmd, cwd=energy_char_dpath, shell=True, check=True,
                            capture_output=(not verbose), text=True)
         except subprocess.CalledProcessError as e:
-            print(f"\nMake command failed with return code {e.returncode}")
+            logging.error(f"Make failed [{cmd}]: {e.returncode}")
             if not verbose:
-                print("STDOUT:\n", e.stdout)
-                print("STDERR:\n", e.stderr)
+                logging.error("STDOUT:\n" + e.stdout)
+                logging.error("STDERR:\n" + e.stderr)
             raise
 
 def runBuild(td, overwrite=False, verbose=False): runMakeCmd("build -B", td, td['obj_dpath'], overwrite, verbose)
