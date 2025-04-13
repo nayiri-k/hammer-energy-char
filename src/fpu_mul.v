@@ -1,17 +1,23 @@
-// source: https://github.com/dawsonjon/fpu/blob/master/multiplier/multiplier.v
+//IEEE Floating Point Multiplier (Single Precision)
+//Copyright (C) Jonathan P Dawson 2013
+//2013-12-12
 
 // derived defines
-`define EXP_MIN -(1 << (`EXPONENT - 1)) + 2
-`define EXP_MAX (1 << (`EXPONENT - 1)) - 1
-`define EXP_OFFSET `EXP_MAX
+`define BIAS ((1 << (`EXPONENT-1)) - 1)
+`define NEG_BIAS -`BIAS
+`define MAXVAL ((1 << `EXPONENT) - 1)
+`define BIAS_PO `BIAS+1
+`define NEG_BIAS_PO `NEG_BIAS+1
 `define SB `WIDTH-1
 `define EHB `WIDTH-2
-`define ELB `MANTISSA
+`define EXPBITS `EHB:`MANTISSA
+`define EXP_PO `EXPONENT+1
+`define EXP_MO `EXPONENT-1
 `define MHB `MANTISSA-1
-`define EXP_MAXVAL ((1 << `EXPONENT) - 1)
-`define MTS_MAXVAL ((1 << (`MANTISSA+1)) - 1)
-`define EXPBITS `EHB:`ELB
+`define MTS_PO `MANTISSA+1
 `define MTSBITS `MHB:0
+`define PROD_NUM ((`MANTISSA*2) + 1)
+`define PRODBITS `PROD_NUM:`MTS_PO
 
 module fpu_mul(
         input_a,
@@ -26,30 +32,29 @@ module fpu_mul(
         input_a_ack,
         input_b_ack);
 
+  localparam LEN = `MTS_PO;
+
   input     clk;
   input     rst;
 
-  input     [`WIDTH-1:0] input_a;
+  input     [`SB:0] input_a;
   input     input_a_stb;
   output    input_a_ack;
 
-  input     [`WIDTH-1:0] input_b;
+  input     [`SB:0] input_b;
   input     input_b_stb;
   output    input_b_ack;
 
-  output    [`WIDTH-1:0] output_z;
+  output    [`SB:0] output_z;
   output    output_z_stb;
   input     output_z_ack;
 
   reg       s_output_z_stb;
-  reg       [`WIDTH-1:0] s_output_z;
+  reg       [`SB:0] s_output_z;
   reg       s_input_a_ack;
   reg       s_input_b_ack;
 
   reg       [3:0] state;
-
-  localparam LEN = `MANTISSA + 1;
-
   parameter get_a         = 4'd0,
             get_b         = 4'd1,
             unpack        = 4'd2,
@@ -64,12 +69,12 @@ module fpu_mul(
             pack          = 4'd11,
             put_z         = 4'd12;
 
-  reg       [`WIDTH-1:0] a, b, z;
+  reg       [`SB:0] a, b, z;
   reg       [`MANTISSA:0] a_m, b_m, z_m;
-  reg       [`EXPONENT+1:0] a_e, b_e, z_e;
+  reg       [`EXP_PO:0] a_e, b_e, z_e;
   reg       a_s, b_s, z_s;
   reg       guard, round_bit, sticky;
-  reg       [((`MANTISSA + 1)*2):0] product;
+  reg       [`PROD_NUM:0] product;
 
   always @(posedge clk)
   begin
@@ -98,72 +103,72 @@ module fpu_mul(
 
       unpack:
       begin
-        a_m <= a[`MANTISSA-1 : 0];
-        b_m <= b[`MANTISSA-1 : 0];
-        a_e <= a[`WIDTH-2 : `MANTISSA] - `EXP_MAX;
-        b_e <= b[`WIDTH-2 : `MANTISSA] - `EXP_MAX;
-        a_s <= a[`WIDTH-1];
-        b_s <= b[`WIDTH-1];
+        a_m <= a[`MTSBITS];
+        b_m <= b[`MTSBITS];
+        a_e <= a[`EXPBITS] - `BIAS;
+        b_e <= b[`EXPBITS] - `BIAS;
+        a_s <= a[`SB];
+        b_s <= b[`SB];
         state <= special_cases;
       end
 
       special_cases:
       begin
         //if a is NaN or b is NaN return NaN 
-        if ((a_e == (`EXP_MAX+1) && a_m != 0) || (b_e == (`EXP_MAX+1) && b_m != 0)) begin
-          z[`WIDTH-1] <= 1;
-          z[`WIDTH-2 : `MANTISSA] <= `EXP_MAXVAL;
-          z[`MANTISSA-1] <= 1;
-          z[`MANTISSA-2 : 0] <= 0;
+        if ((a_e == `BIAS_PO && a_m != 0) || (b_e == `BIAS_PO && b_m != 0)) begin
+          z[`SB] <= 1;
+          z[`EXPBITS] <= `MAXVAL;
+          z[`MHB] <= 1;
+          z[`MHB-1:0] <= 0;
           state <= put_z;
         //if a is inf return inf
-        end else if (a_e == (`EXP_MAX+1)) begin
-          z[`WIDTH-1] <= a_s ^ b_s;
-          z[`WIDTH-2 : `MANTISSA] <= `EXP_MAXVAL;
-          z[`MANTISSA-1 : 0] <= 0;
+        end else if (a_e == `BIAS_PO) begin
+          z[`SB] <= a_s ^ b_s;
+          z[`EXPBITS] <= `MAXVAL;
+          z[`MTSBITS] <= 0;
           //if b is zero return NaN
-          if (($signed(b_e) == -(`EXP_MAX)) && (b_m == 0)) begin
-            z[`WIDTH-1] <= 1;
-            z[`WIDTH-2 : `MANTISSA] <= `EXP_MAXVAL;
-            z[`MANTISSA-1] <= 1;
-            z[`MANTISSA-2 : 0] <= 0;
+          if (($signed(b_e) == `NEG_BIAS) && (b_m == 0)) begin
+            z[`SB] <= 1;
+            z[`EXPBITS] <= `MAXVAL;
+            z[`MHB] <= 1;
+            z[`MHB-1:0] <= 0;
           end
           state <= put_z;
         //if b is inf return inf
-        end else if (b_e == (`EXP_MAX+1)) begin
-          z[`WIDTH-1] <= a_s ^ b_s;
-          z[`WIDTH-2 : `MANTISSA] <= `EXP_MAXVAL;
-          z[`MANTISSA-2 : 0] <= 0;
+        end else if (b_e == `BIAS_PO) begin
+          z[`SB] <= a_s ^ b_s;
+          z[`EXPBITS] <= `MAXVAL;
+          z[`MTSBITS] <= 0;
           //if a is zero return NaN
-          if (($signed(a_e) == -(`EXP_MAX)) && (a_m == 0)) begin
-            z[`WIDTH-1] <= 1;
-            z[`WIDTH-2 : `MANTISSA] <= `EXP_MAXVAL;
-            z[`MANTISSA-1] <= 1;
-            z[`MANTISSA-2 : 0] <= 0;
+          if (($signed(a_e) == `NEG_BIAS) && (a_m == 0)) begin
+            z[`SB] <= 1;
+            z[`EXPBITS] <= `MAXVAL;
+            z[`MHB] <= 1;
+            z[`MHB-1:0] <= 0;
           end
           state <= put_z;
         //if a is zero return zero
-        end else if (($signed(a_e) == -(`EXP_MAX)) && (a_m == 0)) begin
-          z[`WIDTH-1] <= a_s ^ b_s;
-          z[`WIDTH-2 : `MANTISSA] <= 0;
-          z[`MANTISSA-1 : 0] <= 0;
+        end else if (($signed(a_e) == `NEG_BIAS) && (a_m == 0)) begin
+          z[`SB] <= a_s ^ b_s;
+          z[`EXPBITS] <= 0;
+          z[`MTSBITS] <= 0;
           state <= put_z;
         //if b is zero return zero
-        end else if (($signed(b_e) == -(`EXP_MAX)) && (b_m == 0)) begin
-          z[`WIDTH - 1] <= a_s ^ b_s;
-          z[`WIDTH-2 : `MANTISSA] <= 0;
-          z[`MANTISSA-1 : 0] <= 0;
+        end else if (($signed(b_e) == `NEG_BIAS) && (b_m == 0)) begin
+          z[`SB] <= a_s ^ b_s;
+          z[`EXPBITS] <= 0;
+          z[`MTSBITS] <= 0;
           state <= put_z;
         end else begin
           //Denormalised Number
-          if ($signed(a_e) == -(`EXP_MAX)) begin
-            a_e <= (-(`EXP_MAX) + 1);
+          if ($signed(a_e) == `NEG_BIAS) begin
+            a_e <= `NEG_BIAS_PO;
           end else begin
             a_m[`MANTISSA] <= 1;
           end
           //Denormalised Number
-          if ($signed(b_e) == -(`EXP_MAX)) begin
-            b_e <= (-(`EXP_MAX) + 1);
+          if ($signed(b_e) == `NEG_BIAS) begin
+            b_e <= `NEG_BIAS_PO;
           end else begin
             b_m[`MANTISSA] <= 1;
           end
@@ -201,10 +206,10 @@ module fpu_mul(
 
       multiply_1:
       begin
-        z_m <= product[((`MANTISSA + 1)*2) : `MANTISSA+1];
+        z_m <= product[`PRODBITS];
         guard <= product[`MANTISSA];
-        round_bit <= product[`MANTISSA-1];
-        sticky <= (product[`MANTISSA-2 : 0] != 0);
+        round_bit <= product[`MHB];
+        sticky <= (product[`MHB-1:0] != 0);
         state <= normalise_1;
       end
 
@@ -223,7 +228,7 @@ module fpu_mul(
 
       normalise_2:
       begin
-        if ($signed(z_e) < (-(`EXP_MAX) + 1)) begin
+        if ($signed(z_e) < `NEG_BIAS_PO) begin
           z_e <= z_e + 1;
           z_m <= z_m >> 1;
           guard <= z_m[0];
@@ -247,17 +252,17 @@ module fpu_mul(
 
       pack:
       begin
-        z[`MANTISSA-1 : 0] <= z_m[`MANTISSA-1 : 0];
-        z[`WIDTH-2 : `MANTISSA] <= z_e[`EXPONENT-1 : 0] + `EXP_MAX;
-        z[`WIDTH-1] <= z_s;
-        if ($signed(z_e) == (-(`EXP_MAX) + 1) && z_m[`MANTISSA] == 0) begin
-          z[`WIDTH-2 : `MANTISSA] <= 0;
+        z[`MTSBITS] <= z_m[`MTSBITS];
+        z[`EXPBITS] <= z_e[`EXP_MO:0] + `BIAS;
+        z[`SB] <= z_s;
+        if ($signed(z_e) == `NEG_BIAS_PO && z_m[`MANTISSA] == 0) begin
+          z[`EXPBITS] <= 0;
         end
         //if overflow occurs, return inf
-        if ($signed(z_e) > `EXP_MAX) begin
-          z[`MANTISSA-1 : 0] <= 0;
-          z[`WIDTH-2 : `MANTISSA] <= `EXP_MAXVAL;
-          z[`WIDTH-1] <= z_s;
+        if ($signed(z_e) > `BIAS) begin
+          z[`MTSBITS] <= 0;
+          z[`EXPBITS] <= `MAXVAL;
+          z[`SB] <= z_s;
         end
         state <= put_z;
       end
