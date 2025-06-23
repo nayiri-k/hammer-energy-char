@@ -7,7 +7,7 @@ module regfile (
     output [`WIDTH-1:0]      R_data,
     input  [`ADDR_WIDTH-1:0] W_addr,
     input                    W_en,
-    input  [`WIDTH-1:0]      W_data,
+    input  [`WIDTH-1:0]      W_data
 );
 
     reg [`WIDTH-1:0] regs [0:`N-1];
