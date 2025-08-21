@@ -25,19 +25,34 @@ module regfile_tb;
         .W_data(W_data)
     );
 
-    initial begin
+    initial begin    
+
         // reset
-        R_addr = 1'b0;
-        W_addr = 1'b0;
-        R_en = 1'b0;
-        W_en = 1'b0;
-        W_data = 1'b0;
+        file = $fopen({`"`TESTROOT`", "/reset.txt"}, "r");
+        if (file) begin
+            while (!$feof(file)) begin
+                // load vals
+                status = $fscanf(file, "%b %b %b %b %b\n", R_en, R_addr, W_en, W_addr, W_data);
+                if (status == 5) begin
+                end else if (status == -1) begin
+                    $display("Finished reading file.");
+                end else begin
+                    $display("Error reading line.");
+                end
+                // perform operation
+                @(posedge clk);
+                @(negedge clk);
+                $display("Performed the following operation: %b, %b, %b, %b, %b", R_en, R_addr, W_en, W_addr, W_data);
+            end
+        end
+
         @(negedge clk);
-        
+
         // open test file
         $fsdbDumpfile({`"`TESTROOT`", "/output.fsdb"});
         $fsdbDumpvars("+all");
         $fsdbDumpon;
+
 
         file = $fopen({`"`TESTROOT`", "/input.txt"}, "r");
         if (file) begin
