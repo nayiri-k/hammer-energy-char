@@ -8,7 +8,7 @@ module regfile_tb;
 
     reg [`ADDR_WIDTH-1:0] R_addr;
     reg                 R_en;
-    reg [`WIDTH-1:0]      R_data;
+    wire [`WIDTH-1:0]      R_data;
     reg [`ADDR_WIDTH-1:0] W_addr;
     reg                   W_en;
     reg [`WIDTH-1:0]      W_data;
